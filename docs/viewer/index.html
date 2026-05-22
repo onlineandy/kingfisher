@@ -2374,6 +2374,7 @@
                   <button class="btn" id="download-json" type="button">Download JSON</button>
                   <button class="btn" id="download-csv" type="button">Export CSV</button>
                   <input type="text" id="search-input" class="search-input" placeholder="Search rule, path, snippet">
+                  <input type="text" id="repo-filter-input" class="search-input" placeholder="Filter repo (supports *)">
                   <select id="source-filter" class="rows-select">
                     <option value="all" selected>All sources</option>
                     <option value="kingfisher">Kingfisher</option>
@@ -2411,6 +2412,9 @@
                       </th>
                       <th class="sortable" data-field="source">
                         Source <span class="sort-indicator"></span>
+                      </th>
+                      <th class="sortable" data-field="repository">
+                        Repository <span class="sort-indicator"></span>
                       </th>
                       <th class="sortable" data-field="location">
                         Location <span class="sort-indicator"></span>
@@ -2589,6 +2593,7 @@
     let duplicatesRemoved = { kingfisher: 0, trufflehog: 0, gitleaks: 0, total: 0 };
     let filteredAccessMapView = [];
     let currentFilter = "";
+    let repoFilter = "";
     let validationFilter = "all";
     let sourceFilter = "all";
     let pageSize = 10;
@@ -2622,6 +2627,7 @@
     const detectorBreakdownPageInfo = document.getElementById("detector-breakdown-page-info");
 
     const searchInput = document.getElementById("search-input");
+    const repoFilterInput = document.getElementById("repo-filter-input");
     const sourceSelect = document.getElementById("source-filter");
     const validationSelect = document.getElementById("validation-filter");
     const rowsSelect = document.getElementById("rows-select");
@@ -2765,6 +2771,14 @@
       currentPage = 1;
       renderFindingsTable();
     });
+
+    if (repoFilterInput) {
+      repoFilterInput.addEventListener("input", (e) => {
+        repoFilter = e.target.value || "";
+        currentPage = 1;
+        renderFindingsTable();
+      });
+    }
 
     validationSelect.addEventListener("change", (e) => {
       validationFilter = e.target.value || "all";
@@ -3642,6 +3656,7 @@
       duplicatesRemoved = { kingfisher: 0, trufflehog: 0, gitleaks: 0, total: 0 };
 
       currentFilter = "";
+      repoFilter = "";
       validationFilter = "all";
       sourceFilter = "all";
       pageSize = 10;
@@ -3652,6 +3667,7 @@
       detectorBreakdownPage = 1;
 
       searchInput.value = "";
+      if (repoFilterInput) repoFilterInput.value = "";
       validationSelect.value = "all";
       sourceSelect.value = "all";
       rowsSelect.value = "10";
@@ -3906,9 +3922,11 @@
     function finalizeRender(t0) {
       currentPage = 1;
       currentFilter = "";
+      repoFilter = "";
       validationFilter = "all";
       sourceFilter = "all";
       searchInput.value = "";
+      if (repoFilterInput) repoFilterInput.value = "";
       validationSelect.value = "all";
       sourceSelect.value = "all";
 
@@ -4203,15 +4221,26 @@
         const path = (finding.path || "").toLowerCase();
         const snippet = (finding.snippet || "").toLowerCase();
         const fingerprint = (finding.fingerprint || "").toLowerCase();
+        const repository = getFindingRepositoryDisplay(finding).toLowerCase();
         const sourceTool = getFindingSourceTool(finding);
         const status = (finding.validation && finding.validation.status
           ? String(finding.validation.status)
           : "").toLowerCase();
 
         if (filterLower) {
-          if (!ruleName.includes(filterLower) && !path.includes(filterLower) && !snippet.includes(filterLower) && !fingerprint.includes(filterLower)) {
+          if (
+            !ruleName.includes(filterLower) &&
+            !path.includes(filterLower) &&
+            !snippet.includes(filterLower) &&
+            !fingerprint.includes(filterLower) &&
+            !repository.includes(filterLower)
+          ) {
             return false;
           }
+        }
+
+        if (!matchesRepositoryFilter(finding, repoFilter)) {
+          return false;
         }
 
         const normalizedStatus = normalizeValidationStatus(status);
@@ -4252,6 +4281,10 @@
           case "source":
             va = getFindingSourceTool(fa);
             vb = getFindingSourceTool(fb);
+            break;
+          case "repository":
+            va = getFindingRepositoryDisplay(fa).toLowerCase();
+            vb = getFindingRepositoryDisplay(fb).toLowerCase();
             break;
           case "location":
             va = (fa.path || "").toLowerCase();
@@ -4307,6 +4340,81 @@
         return ".../" + parts.slice(-3).join("/");
       }
       return path;
+    }
+
+    function getFindingRepositoryUrl(finding) {
+      if (!finding || typeof finding !== "object") return "";
+      const git = finding.git_metadata && typeof finding.git_metadata === "object"
+        ? finding.git_metadata
+        : {};
+      const repoObj = git.repository && typeof git.repository === "object"
+        ? git.repository
+        : {};
+      return String(
+        firstNonEmpty(
+          repoObj.url,
+          repoObj.web_url,
+          repoObj.html_url,
+          git.repository_url,
+          git.repo_url,
+          finding.repository_url,
+          finding.repo_url
+        ) || ""
+      ).trim();
+    }
+
+    function getRepositoryDisplayName(repoUrl) {
+      const raw = String(repoUrl || "").trim();
+      if (!raw) return "";
+      if (/^git@[^:]+:.+/i.test(raw)) {
+        return raw
+          .replace(/^git@[^:]+:/i, "")
+          .replace(/\.git$/i, "")
+          .replace(/^\/+/, "")
+          .replace(/\/+$/, "");
+      }
+      if (/^ssh:\/\/git@[^/]+\/.+/i.test(raw)) {
+        return raw
+          .replace(/^ssh:\/\/git@[^/]+\//i, "")
+          .replace(/\.git$/i, "")
+          .replace(/^\/+/, "")
+          .replace(/\/+$/, "");
+      }
+      if (!/^https?:\/\//i.test(raw)) return raw;
+      try {
+        const parsed = new URL(raw);
+        const segments = parsed.pathname.split("/").filter(Boolean);
+        if (!segments.length) return raw;
+        const cleaned = segments.map((segment) => segment.replace(/\.git$/i, ""));
+        return cleaned.join("/");
+      } catch (_) {
+        return raw;
+      }
+    }
+
+    function getFindingRepositoryDisplay(finding) {
+      return getRepositoryDisplayName(getFindingRepositoryUrl(finding));
+    }
+
+    function wildcardPatternToRegex(pattern) {
+      const escaped = String(pattern || "")
+        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, ".*");
+      return new RegExp("^" + escaped + "$", "i");
+    }
+
+    function matchesRepositoryFilter(finding, filterText) {
+      const normalizedFilter = String(filterText || "").trim().toLowerCase();
+      if (!normalizedFilter) return true;
+      const repoName = getFindingRepositoryDisplay(finding).toLowerCase();
+      const repoUrl = getFindingRepositoryUrl(finding).toLowerCase();
+      const candidates = [repoName, repoUrl].filter(Boolean);
+      if (!candidates.length) return false;
+      if (normalizedFilter.includes("*")) {
+        const regex = wildcardPatternToRegex(normalizedFilter);
+        return candidates.some((candidate) => regex.test(candidate));
+      }
+      return candidates.some((candidate) => candidate.includes(normalizedFilter));
     }
 
     function normalizeValidationStatus(status) {
@@ -4796,6 +4904,7 @@
         "rule_id",
         "rule_name",
         "source_tool",
+        "repository",
         "file_path",
         "line",
         "validation_status",
@@ -4813,6 +4922,7 @@
           rule.id || "",
           rule.name || "",
           getFindingSourceDisplayName(finding),
+          getFindingRepositoryDisplay(finding),
           finding.path || "",
           finding.line != null ? finding.line : "",
           status,
@@ -5366,7 +5476,7 @@
 
       if (pageItems.length === 0) {
         findingsBody.innerHTML =
-          '<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">No findings match your filters.</td></tr>';
+          '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">No findings match your filters.</td></tr>';
       } else {
         for (let i = 0; i < pageItems.length; i++) {
           const f = pageItems[i] || {};
@@ -5394,6 +5504,11 @@
 
           const sourceTool = getFindingSourceTool(finding);
           const sourceBadge = `<span class="badge ${getSourceBadgeClass(sourceTool)}">${escapeHtml(getSourceDisplayName(sourceTool))}</span>`;
+          const repository = getFindingRepositoryDisplay(finding);
+          const repositoryUrl = getFindingRepositoryUrl(finding);
+          const repositoryCell = repositoryUrl
+            ? `<a href="${escapeHtml(repositoryUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(repository || repositoryUrl)}</a>`
+            : escapeHtml(repository || "—");
 
           const tr = document.createElement("tr");
           tr.innerHTML = `
@@ -5402,6 +5517,9 @@
               <div style="font-size:11px; color:var(--text-muted)">${escapeHtml(rule.id || "")}</div>
             </td>
             <td>${sourceBadge}</td>
+            <td style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:12px;">
+              ${repositoryCell}
+            </td>
             <td style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:12px; color:var(--text-muted);" title="${escapeHtml(path)}">
               ${escapeHtml(trimPath(path))}
             </td>
