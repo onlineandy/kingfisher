@@ -2374,7 +2374,7 @@
                   <button class="btn" id="download-json" type="button">Download JSON</button>
                   <button class="btn" id="download-csv" type="button">Export CSV</button>
                   <input type="text" id="search-input" class="search-input" placeholder="Search rule, path, snippet">
-                  <input type="text" id="repo-filter-input" class="search-input" placeholder="Filter repo (supports *)" aria-label="Filter by repository name (supports wildcard *)">
+                  <input type="text" id="repo-filter-input" class="search-input" placeholder="Filter by repository (supports *)" aria-label="Filter by repository (supports wildcard *)">
                   <select id="source-filter" class="rows-select">
                     <option value="all" selected>All sources</option>
                     <option value="kingfisher">Kingfisher</option>
@@ -2607,6 +2607,7 @@
     let autoCollapsedAccessMap = false;
     let currentDetailFinding = null;
     let scanMetadata = {};
+    let wildcardRepoFilterRegexCache = { pattern: "", regex: null };
 
     const dropZone = document.getElementById("drop-zone");
     const fileInput = document.getElementById("file-input");
@@ -4399,9 +4400,19 @@
 
     function wildcardPatternToRegex(pattern) {
       const escaped = String(pattern || "")
-        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+        .replace(/[.+?^${}()|[\]\\-]/g, "\\$&")
         .replace(/\*/g, ".*");
       return new RegExp("^" + escaped + "$", "i");
+    }
+
+    function getCachedWildcardRepoRegex(pattern) {
+      if (wildcardRepoFilterRegexCache.pattern !== pattern) {
+        wildcardRepoFilterRegexCache = {
+          pattern,
+          regex: wildcardPatternToRegex(pattern),
+        };
+      }
+      return wildcardRepoFilterRegexCache.regex;
     }
 
     function matchesRepositoryFilter(finding, filterText) {
@@ -4412,7 +4423,7 @@
       const candidates = [repoName, repoUrl].filter(Boolean);
       if (!candidates.length) return false;
       if (normalizedFilter.includes("*")) {
-        const regex = wildcardPatternToRegex(normalizedFilter);
+        const regex = getCachedWildcardRepoRegex(normalizedFilter);
         return candidates.some((candidate) => regex.test(candidate));
       }
       return candidates.some((candidate) => candidate.includes(normalizedFilter));
