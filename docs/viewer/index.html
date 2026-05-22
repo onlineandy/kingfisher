@@ -2374,7 +2374,7 @@
                   <button class="btn" id="download-json" type="button">Download JSON</button>
                   <button class="btn" id="download-csv" type="button">Export CSV</button>
                   <input type="text" id="search-input" class="search-input" placeholder="Search rule, path, snippet">
-                  <input type="text" id="repo-filter-input" class="search-input" placeholder="Filter repo (supports *)">
+                  <input type="text" id="repo-filter-input" class="search-input" placeholder="Filter repo (supports *)" aria-label="Filter by repository name (supports wildcard *)">
                   <select id="source-filter" class="rows-select">
                     <option value="all" selected>All sources</option>
                     <option value="kingfisher">Kingfisher</option>
@@ -2658,6 +2658,7 @@
     };
 
     const THEME_KEY = "viewer-theme";
+    const FINDINGS_EMPTY_COLSPAN = 7;
     const systemThemeQuery = window.matchMedia("(prefers-color-scheme: light)");
 
     function getStoredThemePreference() {
@@ -5476,7 +5477,7 @@
 
       if (pageItems.length === 0) {
         findingsBody.innerHTML =
-          '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);">No findings match your filters.</td></tr>';
+          `<tr><td colspan="${FINDINGS_EMPTY_COLSPAN}" style="text-align:center; padding:24px; color:var(--text-muted);">No findings match your filters.</td></tr>`;
       } else {
         for (let i = 0; i < pageItems.length; i++) {
           const f = pageItems[i] || {};
