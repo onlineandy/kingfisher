@@ -2607,7 +2607,7 @@
     let autoCollapsedAccessMap = false;
     let currentDetailFinding = null;
     let scanMetadata = {};
-    let wildcardRepoFilterRegexCache = { pattern: "", regex: null };
+    const repositoryInfoCache = new WeakMap();
 
     const dropZone = document.getElementById("drop-zone");
     const fileInput = document.getElementById("file-input");
@@ -2659,7 +2659,6 @@
     };
 
     const THEME_KEY = "viewer-theme";
-    const FINDINGS_EMPTY_COLSPAN = 7;
     const systemThemeQuery = window.matchMedia("(prefers-color-scheme: light)");
 
     function getStoredThemePreference() {
@@ -4344,27 +4343,6 @@
       return path;
     }
 
-    function getFindingRepositoryUrl(finding) {
-      if (!finding || typeof finding !== "object") return "";
-      const git = finding.git_metadata && typeof finding.git_metadata === "object"
-        ? finding.git_metadata
-        : {};
-      const repoObj = git.repository && typeof git.repository === "object"
-        ? git.repository
-        : {};
-      return String(
-        firstNonEmpty(
-          repoObj.url,
-          repoObj.web_url,
-          repoObj.html_url,
-          git.repository_url,
-          git.repo_url,
-          finding.repository_url,
-          finding.repo_url
-        ) || ""
-      ).trim();
-    }
-
     function getRepositoryDisplayName(repoUrl) {
       const raw = String(repoUrl || "").trim();
       if (!raw) return "";
@@ -4394,25 +4372,70 @@
       }
     }
 
-    function getFindingRepositoryDisplay(finding) {
-      return getRepositoryDisplayName(getFindingRepositoryUrl(finding));
-    }
-
-    function wildcardPatternToRegex(pattern) {
-      const escaped = String(pattern || "")
-        .replace(/[.+?^${}()|[\]\\-]/g, "\\$&")
-        .replace(/\*/g, ".*");
-      return new RegExp("^" + escaped + "$", "i");
-    }
-
-    function getCachedWildcardRepoRegex(pattern) {
-      if (wildcardRepoFilterRegexCache.pattern !== pattern) {
-        wildcardRepoFilterRegexCache = {
-          pattern,
-          regex: wildcardPatternToRegex(pattern),
-        };
+    function getCachedFindingRepositoryInfo(finding) {
+      if (!finding || typeof finding !== "object") {
+        return { url: "", display: "" };
       }
-      return wildcardRepoFilterRegexCache.regex;
+      const cached = repositoryInfoCache.get(finding);
+      if (cached) return cached;
+      const git = finding.git_metadata && typeof finding.git_metadata === "object"
+        ? finding.git_metadata
+        : {};
+      const repoObj = git.repository && typeof git.repository === "object"
+        ? git.repository
+        : {};
+      const url = String(
+        firstNonEmpty(
+          repoObj.url,
+          repoObj.web_url,
+          repoObj.html_url,
+          git.repository_url,
+          git.repo_url,
+          finding.repository_url,
+          finding.repo_url
+        ) || ""
+      ).trim();
+      const resolved = { url, display: getRepositoryDisplayName(url) };
+      repositoryInfoCache.set(finding, resolved);
+      return resolved;
+    }
+
+    function getFindingRepositoryUrl(finding) {
+      return getCachedFindingRepositoryInfo(finding).url;
+    }
+
+    function getFindingRepositoryDisplay(finding) {
+      return getCachedFindingRepositoryInfo(finding).display;
+    }
+
+    function wildcardMatch(text, pattern) {
+      const value = String(text || "");
+      const query = String(pattern || "");
+      let valueIndex = 0;
+      let queryIndex = 0;
+      let starIndex = -1;
+      let fallbackValueIndex = 0;
+
+      while (valueIndex < value.length) {
+        if (queryIndex < query.length && query[queryIndex] === "*") {
+          starIndex = queryIndex++;
+          fallbackValueIndex = valueIndex;
+        } else if (queryIndex < query.length && query[queryIndex] === value[valueIndex]) {
+          queryIndex++;
+          valueIndex++;
+        } else if (starIndex !== -1) {
+          queryIndex = starIndex + 1;
+          valueIndex = ++fallbackValueIndex;
+        } else {
+          return false;
+        }
+      }
+
+      while (queryIndex < query.length && query[queryIndex] === "*") {
+        queryIndex++;
+      }
+
+      return queryIndex === query.length;
     }
 
     function matchesRepositoryFilter(finding, filterText) {
@@ -4423,8 +4446,8 @@
       const candidates = [repoName, repoUrl].filter(Boolean);
       if (!candidates.length) return false;
       if (normalizedFilter.includes("*")) {
-        const regex = getCachedWildcardRepoRegex(normalizedFilter);
-        return candidates.some((candidate) => regex.test(candidate));
+        if (normalizedFilter.length > 256) return false;
+        return candidates.some((candidate) => wildcardMatch(candidate, normalizedFilter));
       }
       return candidates.some((candidate) => candidate.includes(normalizedFilter));
     }
@@ -5485,10 +5508,14 @@
 
       findingsBody.innerHTML = "";
       const frag = document.createDocumentFragment();
+      const findingsColspan =
+        findingsBody && findingsBody.closest("table")
+          ? findingsBody.closest("table").querySelectorAll("thead th").length || 1
+          : 1;
 
       if (pageItems.length === 0) {
         findingsBody.innerHTML =
-          `<tr><td colspan="${FINDINGS_EMPTY_COLSPAN}" style="text-align:center; padding:24px; color:var(--text-muted);">No findings match your filters.</td></tr>`;
+          `<tr><td colspan="${findingsColspan}" style="text-align:center; padding:24px; color:var(--text-muted);">No findings match your filters.</td></tr>`;
       } else {
         for (let i = 0; i < pageItems.length; i++) {
           const f = pageItems[i] || {};
