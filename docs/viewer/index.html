@@ -2374,7 +2374,7 @@
                   <button class="btn" id="download-json" type="button">Download JSON</button>
                   <button class="btn" id="download-csv" type="button">Export CSV</button>
                   <input type="text" id="search-input" class="search-input" placeholder="Search rule, path, snippet">
-                  <input type="text" id="repo-filter-input" class="search-input" placeholder="Filter by repository (supports *)" aria-label="Filter by repository (supports wildcard *)">
+                  <input type="text" id="repo-filter-input" class="search-input" placeholder="Filter by repository (supports *)" aria-label="Filter findings by repository name">
                   <select id="source-filter" class="rows-select">
                     <option value="all" selected>All sources</option>
                     <option value="kingfisher">Kingfisher</option>
@@ -2659,6 +2659,7 @@
     };
 
     const THEME_KEY = "viewer-theme";
+    const MAX_WILDCARD_FILTER_LENGTH = 256;
     const systemThemeQuery = window.matchMedia("(prefers-color-scheme: light)");
 
     function getStoredThemePreference() {
@@ -4446,7 +4447,7 @@
       const candidates = [repoName, repoUrl].filter(Boolean);
       if (!candidates.length) return false;
       if (normalizedFilter.includes("*")) {
-        if (normalizedFilter.length > 256) return false;
+        if (normalizedFilter.length > MAX_WILDCARD_FILTER_LENGTH) return false;
         return candidates.some((candidate) => wildcardMatch(candidate, normalizedFilter));
       }
       return candidates.some((candidate) => candidate.includes(normalizedFilter));
@@ -5508,10 +5509,10 @@
 
       findingsBody.innerHTML = "";
       const frag = document.createDocumentFragment();
-      const findingsColspan =
-        findingsBody && findingsBody.closest("table")
-          ? findingsBody.closest("table").querySelectorAll("thead th").length || 1
-          : 1;
+      const findingsTableElement = findingsBody ? findingsBody.closest("table") : null;
+      const findingsColspan = findingsTableElement
+        ? findingsTableElement.querySelectorAll("thead th").length || 1
+        : 1;
 
       if (pageItems.length === 0) {
         findingsBody.innerHTML =
